@@ -1,0 +1,6 @@
+diff --git a/ops/hello-ops-bot.txt b/ops/hello-ops-bot.txt
+new file mode 100644
+--- /dev/null
++++ b/ops/hello-ops-bot.txt
+@@ -0,0 +1 @@
++Hello from Ops Bot!
