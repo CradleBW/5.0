@@ -1,0 +1,7 @@
+# OPS_BOT_USAGE
+
+enable: true
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
