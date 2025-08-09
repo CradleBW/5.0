@@ -12,7 +12,6 @@ permissions:
 
 jobs:
   apply-patch:
-    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.comment.body, '/apply-patch') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -27,14 +26,18 @@ jobs:
         with:
           script: |
             const body = (context.payload.comment && context.payload.comment.body) || '';
-            const match = body.match(/```(patch|diff)\n([\s\S]*?)```/i);
-            if (!match) {
-              core.setFailed('Не найден код-блок ```patch``` или ```diff``` в комментарии.');
+            // Нужно и триггер-слово, и код-блок с патчем
+            if (!body.includes('/apply-patch')) {
+              core.setFailed('Нет триггера /apply-patch в комментарии.');
               return;
             }
-            const patch = match[2];
+            const match = body.match(/```(patch|diff)\n([\s\S]*?)```/i);
+            if (!match) {
+              core.setFailed('Не найден код-блок ```patch```/```diff``` в комментарии.');
+              return;
+            }
             const fs = require('fs');
-            fs.writeFileSync('incoming.patch', patch, 'utf8');
+            fs.writeFileSync('incoming.patch', match[2], 'utf8');
             core.setOutput('has_patch', 'true');
 
       - name: Show patch (debug)
@@ -45,32 +48,37 @@ jobs:
           echo "------ PATCH END --------"
 
       - name: Configure git author
+        if: steps.extract.outputs.has_patch == 'true'
         run: |
           git config user.name  "ops-bot"
           git config user.email "ops-bot@users.noreply.github.com"
 
       - name: Create work branch
+        if: steps.extract.outputs.has_patch == 'true'
         run: |
           BRANCH="ops/patch-${{ github.run_id }}"
           echo "BRANCH=$BRANCH" >> $GITHUB_ENV
           git checkout -b "$BRANCH"
 
       - name: Apply patch
+        if: steps.extract.outputs.has_patch == 'true'
         id: apply
         run: |
           set -e
           git apply --whitespace=fix --reject incoming.patch || {
-            echo "::error::Патч применился с конфликтами. Загружаю .rej файлы как артефакты."
+            echo "::error::Патч применился с конфликтами."
             exit 2
           }
 
       - name: Commit & push
+        if: steps.extract.outputs.has_patch == 'true'
         run: |
           git add -A
-          git commit -m "Apply patch via Ops Bot (#${{ github.event.issue.number || 'manual' }})"
+          git commit -m "Apply patch via Ops Bot (#${{ github.event.issue && github.event.issue.number || 'manual' }})"
           git push -u origin "$BRANCH"
 
       - name: Open Pull Request
+        if: steps.extract.outputs.has_patch == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -83,29 +91,4 @@ jobs:
               title: 'Ops Bot: apply patch',
               body: 'Автогенерация PR из комментария с патчем.'
             });
-            core.info(`PR: ${pr.html_url}`);
-
-      - name: Comment back (success)
-        if: success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = "✅ Патч применён, создан PR. Проверьте вкладку Pull requests.";
-            if (context.payload.comment) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.issue.number,
-                body
-              });
-            }
-
-      - name: Upload rejects (if conflicts)
-        if: failure() && steps.apply.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: patch-rejects
-          path: |
-            **/*.rej
-            **/*.orig
-            incoming.patch
+            core.info(`PR: ${pr.html_url}`)
